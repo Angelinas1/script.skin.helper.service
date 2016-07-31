@@ -373,7 +373,24 @@ class BackgroundsUpdater(threading.Thread):
             for key, value in image.iteritems():
                 if key == "fanart": WINDOW.setProperty(windowProp, value)
                 else: WINDOW.setProperty(windowProp + "." + key, value)
-       
+    
+    def getPVRArtworkPersistantCacheFiles(self):
+        pvrthumbspath = WINDOW.getProperty("SkinHelper.pvrthumbspath").decode("utf-8")
+        allcachefiles = []
+        if pvrthumbspath:
+            dirs, files = xbmcvfs.listdir(pvrthumbspath)
+            for dir in dirs:
+                cachefile = os.path.join(pvrthumbspath, dir.decode("utf-8"), "pvrdetails.xml")
+                if xbmcvfs.exists( cachefile ):
+                    allcachefiles.append(cachefile)
+                else:
+                    dirs, files = xbmcvfs.listdir(dir)
+                    for dir2 in dirs:
+                        cachefile = os.path.join(pvrthumbspath, dir.decode("utf-8"), dir2.decode("utf-8"), "pvrdetails.xml")
+                        if xbmcvfs.exists( cachefile ):
+                            allcachefiles.append(cachefile)
+        return allcachefiles
+    
     def setPvrBackground(self,windowProp):
         images = []
         if not xbmc.getCondVisibility("Skin.HasSetting(SkinHelper.EnablePVRThumbs) + PVR.HasTVChannels"):
@@ -383,20 +400,31 @@ class BackgroundsUpdater(threading.Thread):
             images = self.allBackgrounds[windowProp]
         else:
             images = []
-            allTitles = []
             if not WINDOW.getProperty("SkinHelper.pvrthumbspath"): 
                 setAddonsettings()
                 
             #only get pvr images from recordings
-            json_query = getJSON('PVR.GetRecordings', '{ "properties": [ %s ]}' %( fields_pvrrecordings))
-            for item in json_query:
-                if not item["title"] in allTitles:
-                    allTitles.append(item["title"])
+            if SETTING("pvrBackgroundRecordingsOnly") == "true":
+                json_query = getJSON('PVR.GetRecordings', '{ "properties": [ %s ]}' %( fields_pvrrecordings))
+                for item in json_query:
                     genre = " / ".join(item["genre"])
                     artwork = artutils.getPVRThumbs(item["title"],item["channel"],"recordings",item["file"],genre)
                     fanart = getCleanImage(artwork.get("fanart",""))
-                    if fanart and xbmcvfs.exists(fanart): images.append({"fanart": fanart, "title": artwork.get("title",""), "landscape": artwork.get("landscape",""), "poster": artwork.get("poster",""), "clearlogo": artwork.get("clearlogo","")})
-                    del artwork
+                    if fanart and xbmcvfs.exists(fanart): 
+                        images.append({"fanart": fanart, "title": artwork.get("title",""), "landscape": artwork.get("landscape",""), "poster": artwork.get("poster",""), "clearlogo": artwork.get("clearlogo","")})
+                    
+            #grab max 50 random images from persistant pvr cache files
+            if not SETTING("pvrBackgroundRecordingsOnly") == "true":
+                cachefiles = self.getPVRArtworkPersistantCacheFiles()
+                random.shuffle(cachefiles)
+                count = 0
+                for cachefile in cachefiles:
+                    artwork = artutils.getArtworkFromCacheFile(cachefile)
+                    fanart = getCleanImage(artwork.get("fanart",""))
+                    if fanart and xbmcvfs.exists(fanart):
+                        count += 1
+                        images.append({"fanart": fanart, "title": artwork.get("title",""), "landscape": artwork.get("landscape",""), "poster": artwork.get("poster",""), "clearlogo": artwork.get("clearlogo","")})
+                    if count >= 50: break
                 
             #store images in the cache
             self.allBackgrounds[windowProp] = images
@@ -583,11 +611,13 @@ class BackgroundsUpdater(threading.Thread):
                             #check if this is a valid path with content
                             if not "script://" in content.lower() and not "mode=9" in content.lower() and not "search" in content.lower() and not "play" in content.lower():
                                 path = "ActivateWindow(%s,%s,return)" %(fav["window"],content)
-                                if "&" in content and "?" in content and "=" in content and not content.endswith("/"): content += "&widget=true"
+                                if "&" in content and "?" in content and "=" in content and not content.endswith("/"): 
+                                    content += "&widget=true"
                                 type = detectPluginContent(content)
                                 if type:
-                                    if not "favorite."%count in self.smartShortcuts["allSmartShortcuts"]: self.smartShortcuts["allSmartShortcuts"].append("favorite."%count )
-                                    favourites.append( (count, label, path, content, type) )
+                                    if not "favorite.%s" %count in self.smartShortcuts["allSmartShortcuts"]: 
+                                        self.smartShortcuts["allSmartShortcuts"].append("favorite.%s" %count )
+                                    favourites.append( (count, fav["title"], path, content, type) )
                 except Exception as e:
                     #something wrong so disable the smartshortcuts for this section for now
                     xbmc.executebuiltin("Skin.Reset(SmartShortcuts.favorites)")

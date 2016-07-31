@@ -164,7 +164,7 @@ def getJSON(method,params):
         else:
             return {}
     else:
-        logMsg("getJson - invalid result for Method %s - params: %s - response: %s" %(method,params, str(jsonobject)),0) 
+        logMsg("getJson - invalid result for Method %s - params: %s - response: %s" %(method,params, str(jsonobject))) 
         return {}
 
 def checkFolders():
@@ -207,6 +207,7 @@ def setAddonsettings():
     WINDOW.setProperty("SkinHelper.enableSpecialsInWidgets",SETTING("enableSpecialsInWidgets"))
     WINDOW.setProperty("SkinHelper.enableWidgetsAlbumBrowse",SETTING("enableWidgetsAlbumBrowse"))
     WINDOW.setProperty("SkinHelper.skipOnlineMusicArtOnLocal",SETTING("skipOnlineMusicArtOnLocal"))
+    WINDOW.setProperty("SkinHelper.musicbrainzmirror",SETTING("musicbrainzmirror"))
     if SETTING("enableCustomMusicArtLookup") == "true": WINDOW.setProperty("SkinHelper.custommusiclookuppath",SETTING("custommusiclookuppath"))
     else: WINDOW.clearProperty("SkinHelper.custommusiclookuppath")
     if SETTING("enablecontextmenu_music") == "true": WINDOW.setProperty("SkinHelper.enablecontextmenu_music","enable")
@@ -452,8 +453,9 @@ def prepareListItem(item):
         properties["Date"] = fulldate
         properties["StartDateTime"] = starttime[0] + " " + starttime[1]
         item["date"] = starttime[0]
-    if item.get("channellogo"): properties["channellogo"] = item.get("channellogo","")
-    if item.get("channellogo"): properties["channelicon"] = item.get("channellogo","")
+    if item.get("channellogo"): 
+        properties["channellogo"] = item["channellogo"]
+        properties["channelicon"] = item["channellogo"]
     if item.get("episodename"): properties["episodename"] = item.get("episodename","")
     if item.get("channel"): properties["channel"] = item.get("channel","")
     if item.get("channel"): properties["channelname"] = item.get("channel","")
@@ -484,50 +486,52 @@ def detectPluginContent(plugin):
     #based on the properties in the listitem we try to detect the content
     
     #load from cache first
-    cacheStr = "skinhelper-widgetcontenttype-%s" %plugin
+    cacheStr = try_encode("skinhelper-widgetcontenttype-%s" %plugin)
     contentType = WINDOW.getProperty(cacheStr).decode("utf-8")
 
     #no cache, we need to detect the contenttype
     if not contentType:
         #detect content based on the path
-        if not contentType:
-            if ("movie" in plugin.lower() or 
-                "box" in plugin.lower() or 
-                "dvd" in plugin.lower() or 
-                "rentals" in plugin.lower() or 
-                "incinemas" in plugin.lower() or 
-                "comingsoon" in plugin.lower() or 
-                "upcoming" in plugin.lower() or 
-                "opening" in plugin.lower() or 
-                "intheaters" in plugin.lower()):
-                    contentType = "movies"
-            elif "album" in plugin.lower():
-                contentType = "albums"
-            elif "show" in plugin.lower():
-                contentType = "tvshows"
-            elif "episode" in plugin.lower():
-                contentType = "episodes"
-            elif "media" in plugin.lower():
+        if ("movie" in plugin.lower() or 
+            "box" in plugin.lower() or 
+            "dvd" in plugin.lower() or 
+            "rentals" in plugin.lower() or 
+            "incinemas" in plugin.lower() or 
+            "comingsoon" in plugin.lower() or 
+            "upcoming" in plugin.lower() or 
+            "opening" in plugin.lower() or 
+            "intheaters" in plugin.lower()):
                 contentType = "movies"
-            elif "favourites" in plugin.lower():
-                contentType = "movies"
-            elif "song" in plugin.lower():
-                contentType = "songs"
-            elif "musicvideo" in plugin.lower():
-                contentType = "musicvideos"
-            elif "type=dynamic" in plugin.lower():
-                contentType = "movies"
-            elif "videos" in plugin.lower():
-                contentType = "movies"
-            elif "type=both" in plugin.lower():
-                contentType = "movies"
+        elif "album" in plugin.lower():
+            contentType = "albums"
+        elif "show" in plugin.lower():
+            contentType = "tvshows"
+        elif "episode" in plugin.lower():
+            contentType = "episodes"
+        elif "media" in plugin.lower():
+            contentType = "movies"
+        elif "favourites" in plugin.lower():
+            contentType = "movies"
+        elif "song" in plugin.lower():
+            contentType = "songs"
+        elif "musicvideo" in plugin.lower():
+            contentType = "musicvideos"
+        elif "type=dynamic" in plugin.lower():
+            contentType = "movies"
+        elif "videos" in plugin.lower():
+            contentType = "movies"
+        elif "type=both" in plugin.lower():
+            contentType = "movies"
 
         #if we didn't get the content based on the path, we need to probe the addon...
         if not contentType and not xbmc.getCondVisibility("Window.IsMedia"): #safety check: check if no library windows are active to prevent any addons setting the view
             logMsg("detectPluginContent probing contenttype for: " + plugin)
             media_array = getJSON('Files.GetDirectory','{ "directory": "%s", "media": "files", "properties": ["title", "file", "thumbnail", "episode", "showtitle", "season", "album", "artist", "imdbnumber", "firstaired", "mpaa", "trailer", "studio", "art"], "limits": {"end":1} }' %plugin)
             for item in media_array:
-                if not item.has_key("showtitle") and not item.has_key("artist"):
+                if item.get("filetype","") == "directory":
+                    contentType = "folder"
+                    break
+                elif not item.has_key("showtitle") and not item.has_key("artist"):
                     #these properties are only returned in the json response if we're looking at actual file content...
                     # if it's missing it means this is a main directory listing and no need to scan the underlying listitems.
                     contentType = "files"
@@ -652,7 +656,7 @@ def getCurrentContentType(containerprefix=""):
         elif xbmc.getCondVisibility("Container.Content(files)"):
             contenttype = "files"
     #last resort: try to determine type by the listitem properties
-    if not contenttype:
+    if not contenttype and (containerprefix or xbmc.getCondVisibility("Window.IsActive(movieinformation)")):
         if xbmc.getCondVisibility("!IsEmpty(%sListItem.DBTYPE)" %containerprefix):
             contenttype = xbmc.getInfoLabel("%sListItem.DBTYPE" %containerprefix) + "s"
         elif xbmc.getCondVisibility("!IsEmpty(%sListItem.Property(DBTYPE))" %containerprefix):
@@ -893,4 +897,16 @@ def getCompareString(string,optionalreplacestring=""):
     string = try_decode(string)
     string = normalize_string(string)
     return string
+    
+def intWithCommas(x):
+    try:
+        x = int(x)
+        if x < 0:
+            return '-' + intWithCommas(-x)
+        result = ''
+        while x >= 1000:
+            x, r = divmod(x, 1000)
+            result = ",%03d%s" % (r, result)
+        return "%d%s" % (x, result)
+    except: return ""
     
